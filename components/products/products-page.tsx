@@ -1,14 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ProductsTable } from '@/components/products/products-table';
 import { AddProductDialog } from '@/components/products/add-product-dialog';
 import { Plus, Package, AlertTriangle, XCircle, Grid3X3 } from 'lucide-react';
+import { db } from '@/lib/database';
+import { toast } from 'sonner';
 
 export interface Product {
-  id: number;
+  id: string;
   name: string;
   category: string;
   price: number;
@@ -16,90 +18,87 @@ export interface Product {
   stock: number;
   status: string;
   description?: string;
+  created_at: string;
+  updated_at: string;
 }
-
-const initialProducts: Product[] = [
-  {
-    id: 1,
-    name: 'iPhone 15 Pro',
-    category: 'Electronics',
-    price: 999.99,
-    salePrice: 899.99,
-    stock: 45,
-    status: 'In Stock',
-    description: 'Latest iPhone with advanced features',
-  },
-  {
-    id: 2,
-    name: 'Samsung Galaxy S24',
-    category: 'Electronics',
-    price: 849.99,
-    salePrice: null,
-    stock: 12,
-    status: 'Low Stock',
-    description: 'Premium Android smartphone',
-  },
-  {
-    id: 3,
-    name: 'MacBook Air M3',
-    category: 'Electronics',
-    price: 1299.99,
-    salePrice: 1199.99,
-    stock: 0,
-    status: 'Out of Stock',
-    description: 'Lightweight laptop with M3 chip',
-  },
-  {
-    id: 4,
-    name: 'Nike Air Max',
-    category: 'Fashion',
-    price: 129.99,
-    salePrice: null,
-    stock: 156,
-    status: 'In Stock',
-    description: 'Comfortable running shoes',
-  },
-  {
-    id: 5,
-    name: 'Coffee Table Oak',
-    category: 'Furniture',
-    price: 299.99,
-    salePrice: 249.99,
-    stock: 8,
-    status: 'Low Stock',
-    description: 'Solid oak coffee table',
-  },
-];
 
 export function ProductsPage() {
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const addProduct = (productData: Omit<Product, 'id' | 'status'>) => {
-    const newProduct: Product = {
-      ...productData,
-      id: Math.max(...products.map(p => p.id)) + 1,
-      status: productData.stock > 20 ? 'In Stock' : productData.stock > 0 ? 'Low Stock' : 'Out of Stock',
-    };
-    setProducts(prev => [...prev, newProduct]);
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      const productsData = await db.products.getAll();
+      
+      // Transform products data to include status
+      const enrichedProducts: Product[] = productsData.map(product => ({
+        ...product,
+        salePrice: product.sale_price,
+        status: product.stock > 20 ? 'In Stock' : product.stock > 0 ? 'Low Stock' : 'Out of Stock',
+      }));
+
+      setProducts(enrichedProducts);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      toast.error('Failed to load products');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateProduct = (id: number, productData: Partial<Product>) => {
-    setProducts(prev => prev.map(product => 
-      product.id === id 
-        ? { 
-            ...product, 
-            ...productData,
-            status: (productData.stock !== undefined) 
-              ? (productData.stock > 20 ? 'In Stock' : productData.stock > 0 ? 'Low Stock' : 'Out of Stock')
-              : product.status
-          }
-        : product
-    ));
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const addProduct = async (productData: Omit<Product, 'id' | 'status' | 'created_at' | 'updated_at'>) => {
+    try {
+      await db.products.create({
+        name: productData.name,
+        category: productData.category,
+        price: productData.price,
+        sale_price: productData.salePrice,
+        stock: productData.stock,
+        description: productData.description || null,
+      });
+
+      toast.success(`${productData.name} has been added successfully!`);
+      loadProducts(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error adding product:', error);
+      toast.error('Failed to add product');
+    }
   };
 
-  const deleteProduct = (id: number) => {
-    setProducts(prev => prev.filter(product => product.id !== id));
+  const updateProduct = async (id: string, productData: Partial<Product>) => {
+    try {
+      await db.products.update(id, {
+        name: productData.name,
+        category: productData.category,
+        price: productData.price,
+        sale_price: productData.salePrice,
+        stock: productData.stock,
+        description: productData.description,
+      });
+
+      toast.success('Product updated successfully!');
+      loadProducts(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error updating product:', error);
+      toast.error('Failed to update product');
+    }
+  };
+
+  const deleteProduct = async (id: string) => {
+    try {
+      await db.products.delete(id);
+      toast.success('Product deleted successfully!');
+      loadProducts(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      toast.error('Failed to delete product');
+    }
   };
 
   const stats = {
@@ -108,6 +107,29 @@ export function ProductsPage() {
     outOfStock: products.filter(p => p.status === 'Out of Stock').length,
     categories: new Set(products.map(p => p.category)).size,
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Products</h1>
+            <p className="text-muted-foreground">Loading product data...</p>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="animate-pulse">
+                <div className="h-4 bg-muted rounded w-3/4"></div>
+                <div className="h-8 bg-muted rounded w-1/2"></div>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

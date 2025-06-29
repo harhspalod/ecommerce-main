@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -10,9 +10,11 @@ import { PriceDropAlert } from '@/components/campaigns/price-drop-alert';
 import { ProductCustomerLookup } from '@/components/campaigns/product-customer-lookup';
 import { CampaignProductConnection } from '@/components/campaigns/campaign-product-connection';
 import { Plus, Megaphone, TrendingUp, Users, DollarSign, Phone } from 'lucide-react';
+import { db } from '@/lib/database';
+import { toast } from 'sonner';
 
 export interface Campaign {
-  id: number;
+  id: string;
   name: string;
   type: string;
   status: string;
@@ -24,112 +26,126 @@ export interface Campaign {
   endDate: string;
   progress: number;
   description?: string;
-  productId?: number; // Connected product
-  productName?: string; // Connected product name
+  productId?: string;
+  productName?: string;
 }
-
-const initialCampaigns: Campaign[] = [
-  {
-    id: 1,
-    name: 'iPhone 15 Pro Holiday Sale',
-    type: 'Discount',
-    status: 'Active',
-    condition: 'Product: iPhone 15 Pro',
-    discount: '15%',
-    triggered: 245,
-    revenue: '$12,450',
-    startDate: '2024-01-01',
-    endDate: '2024-01-31',
-    progress: 85,
-    description: 'Holiday season discount campaign for iPhone customers',
-    productId: 1,
-    productName: 'iPhone 15 Pro',
-  },
-  {
-    id: 2,
-    name: 'Samsung Galaxy Welcome Offer',
-    type: 'Welcome',
-    status: 'Active',
-    condition: 'Product: Samsung Galaxy S24',
-    discount: '10%',
-    triggered: 89,
-    revenue: '$3,560',
-    startDate: '2024-01-01',
-    endDate: '2024-12-31',
-    progress: 65,
-    description: 'Welcome discount for Samsung Galaxy customers',
-    productId: 2,
-    productName: 'Samsung Galaxy S24',
-  },
-  {
-    id: 3,
-    name: 'MacBook VIP Loyalty',
-    type: 'Loyalty',
-    status: 'Active',
-    condition: 'Product: MacBook Air M3',
-    discount: '20%',
-    triggered: 56,
-    revenue: '$8,920',
-    startDate: '2024-01-01',
-    endDate: '2024-06-30',
-    progress: 40,
-    description: 'Loyalty program for MacBook customers',
-    productId: 3,
-    productName: 'MacBook Air M3',
-  },
-  {
-    id: 4,
-    name: 'Nike Flash Weekend Sale',
-    type: 'Flash Sale',
-    status: 'Scheduled',
-    condition: 'Product: Nike Air Max',
-    discount: '25%',
-    triggered: 0,
-    revenue: '$0',
-    startDate: '2024-02-01',
-    endDate: '2024-02-03',
-    progress: 0,
-    description: 'Weekend flash sale for Nike customers',
-    productId: 4,
-    productName: 'Nike Air Max',
-  },
-];
 
 export function CampaignsPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [callsTriggered, setCallsTriggered] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const addCampaign = (campaignData: Omit<Campaign, 'id' | 'triggered' | 'revenue' | 'progress'>) => {
-    const newCampaign: Campaign = {
-      ...campaignData,
-      id: Math.max(...campaigns.map(c => c.id)) + 1,
-      triggered: 0,
-      revenue: '$0',
-      progress: 0,
-    };
-    setCampaigns(prev => [...prev, newCampaign]);
+  const loadCampaigns = async () => {
+    try {
+      setLoading(true);
+      const [campaignsData, callTriggersData] = await Promise.all([
+        db.campaigns.getAll(),
+        db.callTriggers.getAll()
+      ]);
+
+      // Transform campaigns data
+      const enrichedCampaigns: Campaign[] = campaignsData.map(campaign => {
+        const campaignCalls = callTriggersData.filter(call => call.campaign_id === campaign.id);
+        const triggered = campaignCalls.length;
+        const revenue = triggered * 50; // Mock revenue calculation
+        const progress = Math.min((triggered / 10) * 100, 100); // Mock progress calculation
+
+        return {
+          id: campaign.id,
+          name: campaign.name,
+          type: campaign.type,
+          status: campaign.status,
+          condition: campaign.condition,
+          discount: campaign.discount,
+          triggered,
+          revenue: `$${revenue.toLocaleString()}`,
+          startDate: campaign.start_date,
+          endDate: campaign.end_date,
+          progress,
+          description: campaign.description || undefined,
+          productId: campaign.product_id || undefined,
+          productName: campaign.product?.name || undefined,
+        };
+      });
+
+      setCampaigns(enrichedCampaigns);
+      setCallsTriggered(callTriggersData.length);
+    } catch (error) {
+      console.error('Error loading campaigns:', error);
+      toast.error('Failed to load campaigns');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateCampaign = (id: number, campaignData: Partial<Campaign>) => {
-    setCampaigns(prev => prev.map(campaign => 
-      campaign.id === id ? { ...campaign, ...campaignData } : campaign
-    ));
+  useEffect(() => {
+    loadCampaigns();
+  }, []);
+
+  const addCampaign = async (campaignData: Omit<Campaign, 'id' | 'triggered' | 'revenue' | 'progress'>) => {
+    try {
+      await db.campaigns.create({
+        name: campaignData.name,
+        type: campaignData.type,
+        status: campaignData.status,
+        condition: campaignData.condition,
+        discount: campaignData.discount,
+        product_id: campaignData.productId || null,
+        start_date: campaignData.startDate,
+        end_date: campaignData.endDate,
+        description: campaignData.description || null,
+      });
+
+      toast.success(`${campaignData.name} has been created successfully!`);
+      loadCampaigns(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error adding campaign:', error);
+      toast.error('Failed to create campaign');
+    }
   };
 
-  const deleteCampaign = (id: number) => {
-    setCampaigns(prev => prev.filter(campaign => campaign.id !== id));
+  const updateCampaign = async (id: string, campaignData: Partial<Campaign>) => {
+    try {
+      await db.campaigns.update(id, {
+        name: campaignData.name,
+        type: campaignData.type,
+        status: campaignData.status,
+        condition: campaignData.condition,
+        discount: campaignData.discount,
+        product_id: campaignData.productId,
+        start_date: campaignData.startDate,
+        end_date: campaignData.endDate,
+        description: campaignData.description,
+      });
+
+      toast.success('Campaign updated successfully!');
+      loadCampaigns(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error updating campaign:', error);
+      toast.error('Failed to update campaign');
+    }
+  };
+
+  const deleteCampaign = async (id: string) => {
+    try {
+      await db.campaigns.delete(id);
+      toast.success('Campaign deleted successfully!');
+      loadCampaigns(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error deleting campaign:', error);
+      toast.error('Failed to delete campaign');
+    }
   };
 
   const handlePriceDropAlert = (data: any) => {
     setCallsTriggered(prev => prev + data.callsTriggered.length);
+    loadCampaigns(); // Reload to get updated data
   };
 
-  const handleCampaignTriggered = (campaignId: number, callsCount: number) => {
+  const handleCampaignTriggered = (campaignId: string, callsCount: number) => {
     setCallsTriggered(prev => prev + callsCount);
-    updateCampaign(campaignId, { 
-      triggered: campaigns.find(c => c.id === campaignId)?.triggered + callsCount || callsCount 
-    });
+    loadCampaigns(); // Reload to get updated data
   };
 
   const stats = {
@@ -138,6 +154,29 @@ export function CampaignsPage() {
     totalReached: campaigns.reduce((sum, c) => sum + c.triggered, 0),
     avgConversion: campaigns.length > 0 ? campaigns.reduce((sum, c) => sum + c.progress, 0) / campaigns.length : 0,
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Marketing Campaigns</h1>
+            <p className="text-muted-foreground">Loading campaign data...</p>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          {[...Array(5)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="animate-pulse">
+                <div className="h-4 bg-muted rounded w-3/4"></div>
+                <div className="h-8 bg-muted rounded w-1/2"></div>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

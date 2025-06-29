@@ -1,14 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CustomersTable } from '@/components/customers/customers-table';
 import { AddCustomerDialog } from '@/components/customers/add-customer-dialog';
 import { Plus, Users, Package, ShoppingCart, DollarSign } from 'lucide-react';
+import { db } from '@/lib/database';
+import { toast } from 'sonner';
 
 export interface Customer {
-  id: number;
+  id: string;
   name: string;
   email: string;
   phone: string;
@@ -16,10 +18,12 @@ export interface Customer {
   totalSpent: number;
   lastOrder: string | null;
   purchasedProducts: PurchasedProduct[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PurchasedProduct {
-  productId: number;
+  productId: string;
   productName: string;
   purchaseDate: string;
   quantity: number;
@@ -27,160 +31,114 @@ export interface PurchasedProduct {
   totalAmount: number;
 }
 
-const initialCustomers: Customer[] = [
-  {
-    id: 1,
-    name: 'Alice Johnson',
-    email: 'alice@example.com',
-    phone: '+1 (555) 123-4567',
-    orders: 3,
-    totalSpent: 2579.97,
-    lastOrder: '2024-01-15',
-    purchasedProducts: [
-      {
-        productId: 1,
-        productName: 'iPhone 15 Pro',
-        purchaseDate: '2024-01-10',
-        quantity: 1,
-        price: 999.99,
-        totalAmount: 999.99,
-      },
-      {
-        productId: 4,
-        productName: 'Nike Air Max',
-        purchaseDate: '2024-01-05',
-        quantity: 2,
-        price: 129.99,
-        totalAmount: 259.98,
-      },
-      {
-        productId: 3,
-        productName: 'MacBook Air M3',
-        purchaseDate: '2024-01-15',
-        quantity: 1,
-        price: 1299.99,
-        totalAmount: 1299.99,
-      },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Bob Smith',
-    email: 'bob@example.com',
-    phone: '+1 (555) 987-6543',
-    orders: 2,
-    totalSpent: 979.98,
-    lastOrder: '2024-01-12',
-    purchasedProducts: [
-      {
-        productId: 2,
-        productName: 'Samsung Galaxy S24',
-        purchaseDate: '2024-01-08',
-        quantity: 1,
-        price: 849.99,
-        totalAmount: 849.99,
-      },
-      {
-        productId: 4,
-        productName: 'Nike Air Max',
-        purchaseDate: '2024-01-12',
-        quantity: 1,
-        price: 129.99,
-        totalAmount: 129.99,
-      },
-    ],
-  },
-  {
-    id: 3,
-    name: 'Carol Williams',
-    email: 'carol@example.com',
-    phone: '+1 (555) 456-7890',
-    orders: 2,
-    totalSpent: 1599.98,
-    lastOrder: '2024-01-15',
-    purchasedProducts: [
-      {
-        productId: 3,
-        productName: 'MacBook Air M3',
-        purchaseDate: '2024-01-12',
-        quantity: 1,
-        price: 1299.99,
-        totalAmount: 1299.99,
-      },
-      {
-        productId: 5,
-        productName: 'Coffee Table Oak',
-        purchaseDate: '2024-01-15',
-        quantity: 1,
-        price: 299.99,
-        totalAmount: 299.99,
-      },
-    ],
-  },
-  {
-    id: 4,
-    name: 'David Brown',
-    email: 'david@example.com',
-    phone: '+1 (555) 321-9876',
-    orders: 1,
-    totalSpent: 999.99,
-    lastOrder: '2024-01-20',
-    purchasedProducts: [
-      {
-        productId: 1,
-        productName: 'iPhone 15 Pro',
-        purchaseDate: '2024-01-20',
-        quantity: 1,
-        price: 999.99,
-        totalAmount: 999.99,
-      },
-    ],
-  },
-  {
-    id: 5,
-    name: 'Eva Davis',
-    email: 'eva@example.com',
-    phone: '+1 (555) 654-3210',
-    orders: 1,
-    totalSpent: 389.97,
-    lastOrder: '2024-01-18',
-    purchasedProducts: [
-      {
-        productId: 4,
-        productName: 'Nike Air Max',
-        purchaseDate: '2024-01-18',
-        quantity: 3,
-        price: 129.99,
-        totalAmount: 389.97,
-      },
-    ],
-  },
-];
-
 export function CustomersPage() {
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>(initialCustomers);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const addCustomer = (customerData: Omit<Customer, 'id' | 'orders' | 'totalSpent' | 'lastOrder' | 'purchasedProducts'>) => {
-    const newCustomer: Customer = {
-      ...customerData,
-      id: Math.max(...customers.map(c => c.id)) + 1,
-      orders: 0,
-      totalSpent: 0,
-      lastOrder: null,
-      purchasedProducts: [],
-    };
-    setCustomers(prev => [...prev, newCustomer]);
+  const loadCustomers = async () => {
+    try {
+      setLoading(true);
+      const [customersData, purchasesData] = await Promise.all([
+        db.customers.getAll(),
+        db.purchases.getAll()
+      ]);
+
+      // Transform customers data to include purchase information
+      const enrichedCustomers: Customer[] = customersData.map(customer => {
+        const customerPurchases = purchasesData.filter(p => p.customer_id === customer.id);
+        
+        const purchasedProducts: PurchasedProduct[] = customerPurchases.map(purchase => ({
+          productId: purchase.product_id,
+          productName: purchase.product?.name || 'Unknown Product',
+          purchaseDate: purchase.purchase_date,
+          quantity: purchase.quantity,
+          price: purchase.price_paid,
+          totalAmount: purchase.price_paid * purchase.quantity,
+        }));
+
+        const totalSpent = purchasedProducts.reduce((sum, p) => sum + p.totalAmount, 0);
+        const lastOrder = purchasedProducts.length > 0 
+          ? purchasedProducts.reduce((latest, p) => 
+              new Date(p.purchaseDate) > new Date(latest) ? p.purchaseDate : latest
+            , purchasedProducts[0].purchaseDate)
+          : null;
+
+        return {
+          ...customer,
+          orders: purchasedProducts.length,
+          totalSpent,
+          lastOrder,
+          purchasedProducts,
+        };
+      });
+
+      setCustomers(enrichedCustomers);
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      toast.error('Failed to load customers');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateCustomer = (id: number, customerData: Partial<Customer>) => {
-    setCustomers(prev => prev.map(customer => 
-      customer.id === id ? { ...customer, ...customerData } : customer
-    ));
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const addCustomer = async (customerData: { name: string; email: string; phone: string; purchasedProducts: PurchasedProduct[] }) => {
+    try {
+      // Create customer
+      const newCustomer = await db.customers.create({
+        name: customerData.name,
+        email: customerData.email,
+        phone: customerData.phone,
+      });
+
+      // Create purchases if any
+      for (const product of customerData.purchasedProducts) {
+        await db.purchases.create({
+          customer_id: newCustomer.id,
+          product_id: product.productId,
+          quantity: product.quantity,
+          price_paid: product.price,
+          purchase_date: product.purchaseDate,
+        });
+      }
+
+      toast.success(`${newCustomer.name} has been added successfully!`);
+      loadCustomers(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      toast.error('Failed to add customer');
+    }
   };
 
-  const deleteCustomer = (id: number) => {
-    setCustomers(prev => prev.filter(customer => customer.id !== id));
+  const updateCustomer = async (id: string, customerData: Partial<Customer>) => {
+    try {
+      await db.customers.update(id, {
+        name: customerData.name,
+        email: customerData.email,
+        phone: customerData.phone,
+      });
+
+      toast.success('Customer updated successfully!');
+      loadCustomers(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error updating customer:', error);
+      toast.error('Failed to update customer');
+    }
+  };
+
+  const deleteCustomer = async (id: string) => {
+    try {
+      await db.customers.delete(id);
+      toast.success('Customer deleted successfully!');
+      loadCustomers(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error deleting customer:', error);
+      toast.error('Failed to delete customer');
+    }
   };
 
   // Get unique products purchased by all customers
@@ -195,6 +153,29 @@ export function CustomersPage() {
     totalProducts: uniqueProducts.length,
     totalRevenue: customers.reduce((sum, c) => sum + c.totalSpent, 0),
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
+            <p className="text-muted-foreground">Loading customer data...</p>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="animate-pulse">
+                <div className="h-4 bg-muted rounded w-3/4"></div>
+                <div className="h-8 bg-muted rounded w-1/2"></div>
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -229,7 +210,7 @@ export function CustomersPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.withPurchases}</div>
-            <p className="text-xs text-muted-foreground">{Math.round((stats.withPurchases / stats.total) * 100)}% of total</p>
+            <p className="text-xs text-muted-foreground">{stats.total > 0 ? Math.round((stats.withPurchases / stats.total) * 100) : 0}% of total</p>
           </CardContent>
         </Card>
         <Card>
