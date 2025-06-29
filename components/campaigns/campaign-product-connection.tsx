@@ -6,14 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Megaphone, Users, Phone, DollarSign, Package, Zap, AlertCircle } from 'lucide-react';
+import { Megaphone, Users, Phone, DollarSign, Package, Zap, AlertCircle, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { Campaign } from './campaigns-page';
+import { CallPrioritySettings as CallPrioritySettingsType } from './call-priority-settings';
 import { db } from '@/lib/database';
 
 interface CampaignProductConnectionProps {
   campaigns: Campaign[];
   onCampaignTriggered: (campaignId: string, callsCount: number) => void;
+  callSettings?: CallPrioritySettingsType;
 }
 
 interface EligibleCustomer {
@@ -24,9 +26,10 @@ interface EligibleCustomer {
   purchaseDate: string;
   amount: number;
   quantity: number;
+  customerValue: number;
 }
 
-export function CampaignProductConnection({ campaigns, onCampaignTriggered }: CampaignProductConnectionProps) {
+export function CampaignProductConnection({ campaigns, onCampaignTriggered, callSettings }: CampaignProductConnectionProps) {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
   const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
   const [eligibleCustomers, setEligibleCustomers] = useState<EligibleCustomer[]>([]);
@@ -45,33 +48,46 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
 
       setLoading(true);
       try {
-        const purchases = await db.purchases.getByProduct(selectedCampaign.productId);
+        const [productPurchases, allPurchases] = await Promise.all([
+          db.purchases.getByProduct(selectedCampaign.productId),
+          db.purchases.getAll()
+        ]);
         
-        // Transform purchases to eligible customers format
-        const customers: EligibleCustomer[] = purchases.map(purchase => ({
-          id: purchase.customer_id,
-          name: purchase.customer?.name || 'Unknown Customer',
-          email: purchase.customer?.email || '',
-          phone: purchase.customer?.phone || '',
-          purchaseDate: purchase.purchase_date,
-          amount: purchase.price_paid * purchase.quantity,
-          quantity: purchase.quantity,
-        }));
+        // Transform purchases to eligible customers format with customer value calculation
+        const customers: EligibleCustomer[] = productPurchases.map(purchase => {
+          // Calculate total customer value from all purchases
+          const customerAllPurchases = allPurchases.filter(p => p.customer_id === purchase.customer_id);
+          const customerValue = customerAllPurchases.reduce((sum, p) => sum + (p.price_paid * p.quantity), 0);
 
-        // Remove duplicates (same customer multiple purchases)
+          return {
+            id: purchase.customer_id,
+            name: purchase.customer?.name || 'Unknown Customer',
+            email: purchase.customer?.email || '',
+            phone: purchase.customer?.phone || '',
+            purchaseDate: purchase.purchase_date,
+            amount: purchase.price_paid * purchase.quantity,
+            quantity: purchase.quantity,
+            customerValue: customerValue,
+          };
+        });
+
+        // Remove duplicates (same customer multiple purchases) and sort by customer value
         const uniqueCustomers = customers.reduce((acc, current) => {
           const existing = acc.find(c => c.id === current.id);
           if (!existing) {
             acc.push(current);
           } else {
-            // Keep the most recent purchase
+            // Keep the most recent purchase but maintain the total customer value
             if (new Date(current.purchaseDate) > new Date(existing.purchaseDate)) {
               const index = acc.findIndex(c => c.id === current.id);
-              acc[index] = current;
+              acc[index] = { ...current, customerValue: existing.customerValue };
             }
           }
           return acc;
         }, [] as EligibleCustomer[]);
+
+        // Sort by customer value (high-value customers first)
+        uniqueCustomers.sort((a, b) => b.customerValue - a.customerValue);
 
         setEligibleCustomers(uniqueCustomers);
       } catch (error) {
@@ -114,6 +130,7 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
             productId: selectedCampaign.productId,
             triggerType: selectedCampaign.type.toLowerCase().replace(' ', '_'),
             discountPercent: parseInt(selectedCampaign.discount.replace('%', '')),
+            callSettings: callSettings,
           }),
         });
 
@@ -121,14 +138,16 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
           const callData = await response.json();
           
           // Log the complete call data for integration
-          console.log('📞 CALL TRIGGERED - Complete Data Package:');
+          console.log('📞 CALL TRIGGERED WITH PRIORITY SETTINGS:');
           console.log('Customer:', callData.callData.customer_name);
           console.log('Phone:', callData.callData.phone_number);
-          console.log('Product:', callData.callData.product_name);
-          console.log('Campaign:', callData.callData.campaign_name);
-          console.log('Reason:', callData.callData.reason);
-          console.log('Coupon Code:', callData.callData.coupon_code);
-          console.log('Call Script:', callData.callData.call_script);
+          console.log('Priority:', callData.callData.priority);
+          console.log('Customer Value:', `$${customer.customerValue.toFixed(2)}`);
+          console.log('Urgency Level:', `${callData.callData.urgency_level}/10`);
+          console.log('Call Time:', callData.callData.best_call_time);
+          console.log('Timezone:', callData.callData.customer_timezone);
+          console.log('Weekend Calls:', callData.callData.enable_weekend_calls);
+          console.log('Auto Schedule:', callData.callData.auto_schedule);
           console.log('Full JSON:', JSON.stringify(callData.callData, null, 2));
           
           return callData;
@@ -144,8 +163,8 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
       toast.success(
         <div>
           <div className="font-semibold">Campaign "{selectedCampaign.name}" triggered!</div>
-          <div className="text-sm">{successfulCalls.length} calls scheduled with complete data</div>
-          <div className="text-xs text-muted-foreground mt-1">Check console for full call data JSON</div>
+          <div className="text-sm">{successfulCalls.length} calls scheduled with priority settings</div>
+          <div className="text-xs text-muted-foreground mt-1">Check console for complete call data with priority information</div>
         </div>
       );
       
@@ -170,8 +189,26 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
     setSelectedCustomers(eligibleCustomers.map(c => c.id));
   };
 
+  const selectHighValueCustomers = () => {
+    const threshold = callSettings?.customerValueThreshold || 500;
+    const highValueCustomers = eligibleCustomers.filter(c => c.customerValue >= threshold);
+    setSelectedCustomers(highValueCustomers.map(c => c.id));
+    toast.success(`Selected ${highValueCustomers.length} high-value customers (≥$${threshold})`);
+  };
+
   const clearSelection = () => {
     setSelectedCustomers([]);
+  };
+
+  const getCustomerPriorityBadge = (customer: EligibleCustomer) => {
+    const threshold = callSettings?.customerValueThreshold || 500;
+    if (customer.customerValue >= threshold) {
+      return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">High Priority</Badge>;
+    } else if (customer.customerValue >= threshold * 0.5) {
+      return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-xs">Medium Priority</Badge>;
+    } else {
+      return <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Standard Priority</Badge>;
+    }
   };
 
   const activeCampaigns = campaigns.filter(c => c.status === 'Active');
@@ -182,13 +219,28 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Zap className="h-5 w-5 text-orange-600" />
-            <span>Campaign Trigger Center</span>
+            <span>Campaign Trigger Center with Priority Settings</span>
           </CardTitle>
           <CardDescription>
-            Select a campaign to instantly see eligible customers and trigger calls with complete JSON data for external systems.
+            Select a campaign to see eligible customers with priority levels and trigger calls with complete JSON data for external systems.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {callSettings && (
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center space-x-2 mb-2">
+                <Settings className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-700">Active Call Settings</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-blue-600">
+                <div>Priority: <strong>{callSettings.priority.toUpperCase()}</strong></div>
+                <div>Call Time: <strong>{callSettings.callTimePreference}</strong></div>
+                <div>Timezone: <strong>{callSettings.timezone}</strong></div>
+                <div>Value Threshold: <strong>${callSettings.customerValueThreshold}</strong></div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="text-sm font-medium">Select Active Campaign</label>
             <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
@@ -250,8 +302,11 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
-              <span>Eligible Customers ({eligibleCustomers.length})</span>
+              <span>Eligible Customers ({eligibleCustomers.length}) - Sorted by Value</span>
               <div className="space-x-2">
+                <Button variant="outline" size="sm" onClick={selectHighValueCustomers} disabled={loading}>
+                  Select High-Value
+                </Button>
                 <Button variant="outline" size="sm" onClick={selectAllCustomers} disabled={loading}>
                   Select All
                 </Button>
@@ -261,7 +316,7 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
               </div>
             </CardTitle>
             <CardDescription>
-              Customers who purchased {selectedCampaign.productName} and are eligible for this campaign.
+              Customers who purchased {selectedCampaign.productName} with priority levels based on customer value.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -306,12 +361,18 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right space-y-1">
                         <div className="font-bold text-green-600">${customer.amount.toFixed(2)}</div>
                         <div className="text-xs text-muted-foreground">
                           {new Date(customer.purchaseDate).toLocaleDateString()}
                         </div>
-                        <Badge variant="outline" className="text-xs mt-1">
+                        <div className="flex items-center space-x-1">
+                          {getCustomerPriorityBadge(customer)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Total Value: <strong>${customer.customerValue.toFixed(2)}</strong>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
                           Qty: {customer.quantity} • Eligible for {selectedCampaign.discount} off
                         </Badge>
                       </div>
@@ -355,9 +416,9 @@ export function CampaignProductConnection({ campaigns, onCampaignTriggered }: Ca
                   <div className="flex items-start space-x-2">
                     <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5" />
                     <div className="text-sm text-blue-700">
-                      <p className="font-medium">Complete Call Data Package Ready</p>
-                      <p>Each call will include: Customer details, product info, campaign data, call script, coupon codes, and purchase history.</p>
-                      <p className="text-xs mt-1">JSON data will be logged to console for external system integration.</p>
+                      <p className="font-medium">Complete Call Data Package with Priority Settings Ready</p>
+                      <p>Each call will include: Customer details, priority level, call timing preferences, customer value, urgency settings, and complete purchase history.</p>
+                      <p className="text-xs mt-1">JSON data with priority settings will be logged to console for external system integration.</p>
                     </div>
                   </div>
                 </div>

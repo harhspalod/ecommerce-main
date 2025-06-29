@@ -9,7 +9,8 @@ import { CreateCampaignDialog } from '@/components/campaigns/create-campaign-dia
 import { PriceDropAlert } from '@/components/campaigns/price-drop-alert';
 import { ProductCustomerLookup } from '@/components/campaigns/product-customer-lookup';
 import { CampaignProductConnection } from '@/components/campaigns/campaign-product-connection';
-import { Plus, Megaphone, TrendingUp, Users, DollarSign, Phone } from 'lucide-react';
+import { CallPrioritySettings, CallPrioritySettings as CallPrioritySettingsType } from '@/components/campaigns/call-priority-settings';
+import { Plus, Megaphone, TrendingUp, Users, DollarSign, Phone, Settings } from 'lucide-react';
 import { db } from '@/lib/database';
 import { toast } from 'sonner';
 
@@ -35,6 +36,16 @@ export function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [callsTriggered, setCallsTriggered] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [callSettings, setCallSettings] = useState<CallPrioritySettingsType>({
+    priority: 'medium',
+    callTimePreference: '2:00 PM - 4:00 PM',
+    timezone: 'EST',
+    maxCallsPerDay: 50,
+    enableWeekendCalls: false,
+    customerValueThreshold: 500,
+    urgencyLevel: 5,
+    autoSchedule: true,
+  });
 
   const loadCampaigns = async () => {
     try {
@@ -148,6 +159,22 @@ export function CampaignsPage() {
     loadCampaigns(); // Reload to get updated data
   };
 
+  const handleSettingsChange = (newSettings: CallPrioritySettingsType) => {
+    setCallSettings(newSettings);
+    toast.success('Call settings updated successfully!');
+    
+    // Log settings for external system integration
+    console.log('📞 CALL SETTINGS UPDATED:');
+    console.log('Priority:', newSettings.priority);
+    console.log('Call Time:', newSettings.callTimePreference);
+    console.log('Timezone:', newSettings.timezone);
+    console.log('Max Daily Calls:', newSettings.maxCallsPerDay);
+    console.log('Weekend Calls:', newSettings.enableWeekendCalls);
+    console.log('Customer Value Threshold:', newSettings.customerValueThreshold);
+    console.log('Urgency Level:', newSettings.urgencyLevel);
+    console.log('Auto Schedule:', newSettings.autoSchedule);
+  };
+
   const stats = {
     active: campaigns.filter(c => c.status === 'Active').length,
     totalRevenue: campaigns.reduce((sum, c) => sum + parseFloat(c.revenue.replace('$', '').replace(',', '')), 0),
@@ -184,7 +211,7 @@ export function CampaignsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Marketing Campaigns</h1>
           <p className="text-muted-foreground">
-            Create product-connected campaigns and instantly trigger calls to eligible customers.
+            Create product-connected campaigns and instantly trigger calls to eligible customers with priority settings.
           </p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)}>
@@ -250,6 +277,7 @@ export function CampaignsPage() {
         <TabsList>
           <TabsTrigger value="campaign-triggers">Campaign Triggers</TabsTrigger>
           <TabsTrigger value="campaigns">Campaign Management</TabsTrigger>
+          <TabsTrigger value="call-settings">Call Settings</TabsTrigger>
           <TabsTrigger value="price-alerts">Price Drop Alerts</TabsTrigger>
           <TabsTrigger value="product-lookup">Product-Customer Lookup</TabsTrigger>
         </TabsList>
@@ -258,6 +286,7 @@ export function CampaignsPage() {
           <CampaignProductConnection 
             campaigns={campaigns}
             onCampaignTriggered={handleCampaignTriggered}
+            callSettings={callSettings}
           />
         </TabsContent>
 
@@ -277,6 +306,13 @@ export function CampaignsPage() {
               />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="call-settings" className="space-y-4">
+          <CallPrioritySettings 
+            onSettingsChange={handleSettingsChange}
+            currentSettings={callSettings}
+          />
         </TabsContent>
 
         <TabsContent value="price-alerts" className="space-y-4">
