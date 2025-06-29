@@ -14,13 +14,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Package, Database } from 'lucide-react';
 import { toast } from 'sonner';
 import { Product } from './products-page';
 
 interface AddProductDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddProduct: (product: Omit<Product, 'id' | 'status'>) => void;
+  onAddProduct: (product: Omit<Product, 'id' | 'status' | 'created_at' | 'updated_at'>) => void;
 }
 
 export function AddProductDialog({ open, onOpenChange, onAddProduct }: AddProductDialogProps) {
@@ -75,7 +77,6 @@ export function AddProductDialog({ open, onOpenChange, onAddProduct }: AddProduc
     };
 
     onAddProduct(productData);
-    toast.success(`${productData.name} has been added successfully!`);
     onOpenChange(false);
     
     // Reset form
@@ -94,11 +95,25 @@ export function AddProductDialog({ open, onOpenChange, onAddProduct }: AddProduc
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add New Product</DialogTitle>
+          <DialogTitle className="flex items-center space-x-2">
+            <Package className="h-5 w-5" />
+            <span>Add New Product</span>
+          </DialogTitle>
           <DialogDescription>
-            Add a new product to your inventory. Fill in all the required information.
+            Add a new product to your inventory. This product will be available for campaign connections and customer purchases.
           </DialogDescription>
         </DialogHeader>
+        
+        <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 mb-4">
+          <div className="flex items-center space-x-2">
+            <Database className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-700">Database Integration</span>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">
+            Product will be stored with unique UUID and available for campaign targeting
+          </p>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Product Name *</Label>
@@ -186,6 +201,28 @@ export function AddProductDialog({ open, onOpenChange, onAddProduct }: AddProduc
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}
             />
+          </div>
+
+          <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+            <h4 className="text-sm font-medium text-green-700 mb-2">After Adding Product:</h4>
+            <div className="space-y-1 text-xs text-green-600">
+              <div className="flex items-center space-x-2">
+                <Badge variant="outline" className="text-xs">✓</Badge>
+                <span>Product will get unique UUID identifier</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Badge variant="outline" className="text-xs">✓</Badge>
+                <span>Available for campaign targeting</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Badge variant="outline" className="text-xs">✓</Badge>
+                <span>Can be assigned to customer purchases</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Badge variant="outline" className="text-xs">✓</Badge>
+                <span>Ready for price drop alerts</span>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>

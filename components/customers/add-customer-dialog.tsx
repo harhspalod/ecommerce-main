@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,29 +15,23 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Package } from 'lucide-react';
+import { Plus, Trash2, Package, Database, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Customer, PurchasedProduct } from './customers-page';
+import { db } from '@/lib/database';
 
 interface AddCustomerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAddCustomer: (customer: Omit<Customer, 'id' | 'orders' | 'totalSpent' | 'lastOrder'>) => void;
+  onAddCustomer: (customer: { name: string; email: string; phone: string; purchasedProducts: PurchasedProduct[] }) => void;
 }
 
-// Available products for selection
-const availableProducts = [
-  { id: 1, name: 'iPhone 15 Pro', price: 999.99 },
-  { id: 2, name: 'Samsung Galaxy S24', price: 849.99 },
-  { id: 3, name: 'MacBook Air M3', price: 1299.99 },
-  { id: 4, name: 'Nike Air Max', price: 129.99 },
-  { id: 5, name: 'Coffee Table Oak', price: 299.99 },
-  { id: 6, name: 'Sony WH-1000XM5', price: 399.99 },
-  { id: 7, name: 'iPad Pro 12.9"', price: 1099.99 },
-  { id: 8, name: 'Dell XPS 13', price: 1199.99 },
-  { id: 9, name: 'AirPods Pro', price: 249.99 },
-  { id: 10, name: 'Samsung 55" QLED TV', price: 1299.99 },
-];
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+}
 
 export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCustomerDialogProps) {
   const [formData, setFormData] = useState({
@@ -46,6 +40,7 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
     phone: '',
   });
 
+  const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
   const [purchasedProducts, setPurchasedProducts] = useState<PurchasedProduct[]>([]);
   const [currentProduct, setCurrentProduct] = useState({
     productId: '',
@@ -55,6 +50,27 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loadingProducts, setLoadingProducts] = useState(false);
+
+  // Load products from database
+  useEffect(() => {
+    const loadProducts = async () => {
+      if (!open) return;
+      
+      setLoadingProducts(true);
+      try {
+        const products = await db.products.getAll();
+        setAvailableProducts(products);
+      } catch (error) {
+        console.error('Error loading products:', error);
+        toast.error('Failed to load products');
+      } finally {
+        setLoadingProducts(false);
+      }
+    };
+
+    loadProducts();
+  }, [open]);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -94,7 +110,7 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
   const addProduct = () => {
     if (!validateCurrentProduct()) return;
 
-    const selectedProduct = availableProducts.find(p => p.id === parseInt(currentProduct.productId));
+    const selectedProduct = availableProducts.find(p => p.id === currentProduct.productId);
     if (!selectedProduct) return;
 
     const price = currentProduct.customPrice ? parseFloat(currentProduct.customPrice) : selectedProduct.price;
@@ -130,7 +146,7 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
     toast.success(`${selectedProduct.name} added to purchase history`);
   };
 
-  const removeProduct = (productId: number) => {
+  const removeProduct = (productId: string) => {
     setPurchasedProducts(prev => prev.filter(p => p.productId !== productId));
     toast.success('Product removed from purchase history');
   };
@@ -154,8 +170,6 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
       return;
     }
 
-    const { totalSpent, totalOrders, lastOrder } = calculateTotals();
-
     const customerData = {
       name: formData.name.trim(),
       email: formData.email.trim().toLowerCase(),
@@ -164,7 +178,6 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
     };
 
     onAddCustomer(customerData);
-    toast.success(`${customerData.name} has been added with ${totalOrders} products!`);
     onOpenChange(false);
     
     // Reset form
@@ -189,11 +202,24 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add New Customer</DialogTitle>
+          <DialogTitle className="flex items-center space-x-2">
+            <Users className="h-5 w-5" />
+            <span>Add New Customer</span>
+          </DialogTitle>
           <DialogDescription>
-            Add a new customer with their complete purchase history. Fill in customer details and add all products they have purchased.
+            Add a new customer with their complete purchase history. This creates the customer-product connections needed for campaign targeting.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 mb-4">
+          <div className="flex items-center space-x-2">
+            <Database className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-700">Database Integration</span>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">
+            Customer and purchase records will be stored with proper UUID relationships for campaign targeting
+          </p>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Customer Basic Information */}
@@ -248,66 +274,79 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Add Product Purchase</CardTitle>
-              <CardDescription>Add products that this customer has purchased</CardDescription>
+              <CardDescription>Add products that this customer has purchased (creates campaign eligibility)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="productId">Product *</Label>
-                  <Select value={currentProduct.productId} onValueChange={(value) => setCurrentProduct({ ...currentProduct, productId: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableProducts.map((product) => (
-                        <SelectItem key={product.id} value={product.id.toString()}>
-                          {product.name} - ${product.price}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              {loadingProducts ? (
+                <div className="text-center py-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                  <p className="text-sm text-muted-foreground mt-2">Loading products...</p>
                 </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="productId">Product *</Label>
+                      <Select value={currentProduct.productId} onValueChange={(value) => setCurrentProduct({ ...currentProduct, productId: value })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableProducts.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>
+                              <div className="flex items-center space-x-2">
+                                <span>{product.name}</span>
+                                <Badge variant="outline">${product.price}</Badge>
+                                <span className="text-xs text-muted-foreground">• {product.category}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="purchaseDate">Purchase Date *</Label>
-                  <Input
-                    id="purchaseDate"
-                    type="date"
-                    value={currentProduct.purchaseDate}
-                    onChange={(e) => setCurrentProduct({ ...currentProduct, purchaseDate: e.target.value })}
-                  />
-                </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="purchaseDate">Purchase Date *</Label>
+                      <Input
+                        id="purchaseDate"
+                        type="date"
+                        value={currentProduct.purchaseDate}
+                        onChange={(e) => setCurrentProduct({ ...currentProduct, purchaseDate: e.target.value })}
+                      />
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantity *</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min="1"
-                    placeholder="1"
-                    value={currentProduct.quantity}
-                    onChange={(e) => setCurrentProduct({ ...currentProduct, quantity: e.target.value })}
-                  />
-                </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="quantity">Quantity *</Label>
+                      <Input
+                        id="quantity"
+                        type="number"
+                        min="1"
+                        placeholder="1"
+                        value={currentProduct.quantity}
+                        onChange={(e) => setCurrentProduct({ ...currentProduct, quantity: e.target.value })}
+                      />
+                    </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="customPrice">Custom Price ($)</Label>
-                  <Input
-                    id="customPrice"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Leave empty for default"
-                    value={currentProduct.customPrice}
-                    onChange={(e) => setCurrentProduct({ ...currentProduct, customPrice: e.target.value })}
-                  />
-                </div>
-              </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="customPrice">Custom Price ($)</Label>
+                      <Input
+                        id="customPrice"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="Leave empty for default"
+                        value={currentProduct.customPrice}
+                        onChange={(e) => setCurrentProduct({ ...currentProduct, customPrice: e.target.value })}
+                      />
+                    </div>
+                  </div>
 
-              <Button type="button" onClick={addProduct} className="w-full">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Product to Purchase History
-              </Button>
+                  <Button type="button" onClick={addProduct} className="w-full">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Product to Purchase History
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -330,7 +369,7 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
                       <div className="flex-1">
                         <div className="flex items-center space-x-2">
                           <h4 className="font-medium">{product.productName}</h4>
-                          <Badge variant="outline">ID: {product.productId}</Badge>
+                          <Badge variant="outline">ID: {product.productId.slice(0, 8)}...</Badge>
                         </div>
                         <div className="flex items-center space-x-4 text-sm text-muted-foreground mt-1">
                           <span>Date: {new Date(product.purchaseDate).toLocaleDateString()}</span>
@@ -353,6 +392,18 @@ export function AddCustomerDialog({ open, onOpenChange, onAddCustomer }: AddCust
                       </div>
                     </div>
                   ))}
+                </div>
+
+                <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                  <h4 className="text-sm font-medium text-green-700 mb-2">Campaign Eligibility Created:</h4>
+                  <div className="space-y-1 text-xs text-green-600">
+                    {purchasedProducts.map((product, index) => (
+                      <div key={index} className="flex items-center space-x-2">
+                        <Badge variant="outline" className="text-xs">✓</Badge>
+                        <span>Eligible for {product.productName} campaigns</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </CardContent>
             </Card>

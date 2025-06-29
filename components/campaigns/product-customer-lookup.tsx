@@ -1,71 +1,109 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Package, Users, Phone, DollarSign } from 'lucide-react';
+import { Package, Users, Phone, DollarSign, Database } from 'lucide-react';
 import { toast } from 'sonner';
+import { db } from '@/lib/database';
 
-const mockProducts = [
-  { id: 1, name: 'iPhone 15 Pro', price: 999.99, category: 'Electronics' },
-  { id: 2, name: 'Samsung Galaxy S24', price: 849.99, category: 'Electronics' },
-  { id: 3, name: 'MacBook Air M3', price: 1299.99, category: 'Electronics' },
-  { id: 4, name: 'Nike Air Max', price: 129.99, category: 'Fashion' },
-  { id: 5, name: 'Coffee Table Oak', price: 299.99, category: 'Furniture' },
-];
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+}
 
-// Mock customer data with product connections
-const mockCustomerProductData = [
-  {
-    productId: 1,
-    productName: 'iPhone 15 Pro',
-    customers: [
-      { id: 1, name: 'Alice Johnson', email: 'alice@example.com', phone: '+1-555-123-4567', purchaseDate: '2024-01-10', amount: 999.99 },
-      { id: 4, name: 'David Brown', email: 'david@example.com', phone: '+1-555-321-9876', purchaseDate: '2024-01-20', amount: 999.99 },
-    ]
-  },
-  {
-    productId: 2,
-    productName: 'Samsung Galaxy S24',
-    customers: [
-      { id: 2, name: 'Bob Smith', email: 'bob@example.com', phone: '+1-555-987-6543', purchaseDate: '2024-01-08', amount: 849.99 },
-    ]
-  },
-  {
-    productId: 3,
-    productName: 'MacBook Air M3',
-    customers: [
-      { id: 1, name: 'Alice Johnson', email: 'alice@example.com', phone: '+1-555-123-4567', purchaseDate: '2024-01-15', amount: 1299.99 },
-      { id: 3, name: 'Carol Williams', email: 'carol@example.com', phone: '+1-555-456-7890', purchaseDate: '2024-01-12', amount: 1299.99 },
-    ]
-  },
-  {
-    productId: 4,
-    productName: 'Nike Air Max',
-    customers: [
-      { id: 1, name: 'Alice Johnson', email: 'alice@example.com', phone: '+1-555-123-4567', purchaseDate: '2024-01-05', amount: 259.98 },
-      { id: 2, name: 'Bob Smith', email: 'bob@example.com', phone: '+1-555-987-6543', purchaseDate: '2024-01-12', amount: 129.99 },
-      { id: 5, name: 'Eva Davis', email: 'eva@example.com', phone: '+1-555-654-3210', purchaseDate: '2024-01-18', amount: 389.97 },
-    ]
-  },
-  {
-    productId: 5,
-    productName: 'Coffee Table Oak',
-    customers: [
-      { id: 3, name: 'Carol Williams', email: 'carol@example.com', phone: '+1-555-456-7890', purchaseDate: '2024-01-15', amount: 299.99 },
-    ]
-  },
-];
+interface CustomerWithPurchase {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  purchaseDate: string;
+  amount: number;
+  quantity: number;
+}
 
 export function ProductCustomerLookup() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [selectedCustomers, setSelectedCustomers] = useState<number[]>([]);
+  const [selectedCustomers, setSelectedCustomers] = useState<string[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productCustomers, setProductCustomers] = useState<CustomerWithPurchase[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
 
-  const selectedProduct = mockProducts.find(p => p.id === parseInt(selectedProductId));
-  const productCustomers = mockCustomerProductData.find(pcd => pcd.productId === parseInt(selectedProductId))?.customers || [];
+  // Load products from database
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        setLoadingProducts(true);
+        const productsData = await db.products.getAll();
+        setProducts(productsData);
+      } catch (error) {
+        console.error('Error loading products:', error);
+        toast.error('Failed to load products');
+      } finally {
+        setLoadingProducts(false);
+      }
+    };
+
+    loadProducts();
+  }, []);
+
+  // Load customers when product is selected
+  useEffect(() => {
+    const loadCustomers = async () => {
+      if (!selectedProductId) {
+        setProductCustomers([]);
+        return;
+      }
+
+      setLoadingCustomers(true);
+      try {
+        const purchases = await db.purchases.getByProduct(selectedProductId);
+        
+        // Transform purchases to customer format
+        const customers: CustomerWithPurchase[] = purchases.map(purchase => ({
+          id: purchase.customer_id,
+          name: purchase.customer?.name || 'Unknown Customer',
+          email: purchase.customer?.email || '',
+          phone: purchase.customer?.phone || '',
+          purchaseDate: purchase.purchase_date,
+          amount: purchase.price_paid * purchase.quantity,
+          quantity: purchase.quantity,
+        }));
+
+        // Remove duplicates (same customer multiple purchases) - keep most recent
+        const uniqueCustomers = customers.reduce((acc, current) => {
+          const existing = acc.find(c => c.id === current.id);
+          if (!existing) {
+            acc.push(current);
+          } else {
+            // Keep the most recent purchase
+            if (new Date(current.purchaseDate) > new Date(existing.purchaseDate)) {
+              const index = acc.findIndex(c => c.id === current.id);
+              acc[index] = current;
+            }
+          }
+          return acc;
+        }, [] as CustomerWithPurchase[]);
+
+        setProductCustomers(uniqueCustomers);
+      } catch (error) {
+        console.error('Error loading customers:', error);
+        toast.error('Failed to load customers');
+      } finally {
+        setLoadingCustomers(false);
+      }
+    };
+
+    loadCustomers();
+  }, [selectedProductId]);
+
+  const selectedProduct = products.find(p => p.id === selectedProductId);
 
   const handleTriggerCalls = async () => {
     if (selectedCustomers.length === 0) {
@@ -84,21 +122,41 @@ export function ProductCustomerLookup() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            campaignId: 1,
+            campaignId: 'manual-campaign-' + Date.now(),
             customerId: customer.id,
-            productId: parseInt(selectedProductId),
+            productId: selectedProductId,
             triggerType: 'promotion',
             discountPercent: 15,
           }),
         });
 
-        return response.ok ? await response.json() : null;
+        if (response.ok) {
+          const callData = await response.json();
+          
+          // Log the complete call data for integration
+          console.log('📞 MANUAL CALL TRIGGERED - Complete Data Package:');
+          console.log('Customer:', callData.callData.customer_name);
+          console.log('Phone:', callData.callData.phone_number);
+          console.log('Product:', callData.callData.product_name);
+          console.log('Reason:', callData.callData.reason);
+          console.log('Full JSON:', JSON.stringify(callData.callData, null, 2));
+          
+          return callData;
+        }
+        return null;
       });
 
       const results = await Promise.all(callPromises);
       const successfulCalls = results.filter(r => r !== null);
 
-      toast.success(`${successfulCalls.length} calls triggered successfully!`);
+      toast.success(
+        <div>
+          <div className="font-semibold">{successfulCalls.length} calls triggered successfully!</div>
+          <div className="text-sm">Complete call data logged to console</div>
+          <div className="text-xs text-muted-foreground mt-1">Check console for JSON integration data</div>
+        </div>
+      );
+      
       setSelectedCustomers([]);
     } catch (error) {
       console.error('Error triggering calls:', error);
@@ -106,7 +164,7 @@ export function ProductCustomerLookup() {
     }
   };
 
-  const toggleCustomerSelection = (customerId: number) => {
+  const toggleCustomerSelection = (customerId: string) => {
     setSelectedCustomers(prev => 
       prev.includes(customerId) 
         ? prev.filter(id => id !== customerId)
@@ -122,6 +180,26 @@ export function ProductCustomerLookup() {
     setSelectedCustomers([]);
   };
 
+  if (loadingProducts) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Package className="h-5 w-5" />
+            <span>Product-Customer Campaign Lookup</span>
+          </CardTitle>
+          <CardDescription>Loading products...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+            <p className="text-sm text-muted-foreground mt-2">Loading products from database...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -130,10 +208,20 @@ export function ProductCustomerLookup() {
           <span>Product-Customer Campaign Lookup</span>
         </CardTitle>
         <CardDescription>
-          Select a product to see all customers who purchased it and trigger targeted campaigns.
+          Select a product to see all customers who purchased it and trigger targeted campaigns with complete call data.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex items-center space-x-2">
+            <Database className="h-4 w-4 text-blue-600" />
+            <span className="text-sm font-medium text-blue-700">Real-Time Database Lookup</span>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">
+            Live customer data with purchase history and complete call information generation
+          </p>
+        </div>
+
         <div className="space-y-2">
           <label className="text-sm font-medium">Select Product</label>
           <Select value={selectedProductId} onValueChange={setSelectedProductId}>
@@ -141,9 +229,13 @@ export function ProductCustomerLookup() {
               <SelectValue placeholder="Choose a product to see its customers" />
             </SelectTrigger>
             <SelectContent>
-              {mockProducts.map((product) => (
-                <SelectItem key={product.id} value={product.id.toString()}>
-                  {product.name} - ${product.price} ({product.category})
+              {products.map((product) => (
+                <SelectItem key={product.id} value={product.id}>
+                  <div className="flex items-center space-x-2">
+                    <span>{product.name}</span>
+                    <Badge variant="outline">${product.price}</Badge>
+                    <span className="text-xs text-muted-foreground">• {product.category}</span>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -156,15 +248,20 @@ export function ProductCustomerLookup() {
               <div>
                 <h3 className="font-medium">{selectedProduct.name}</h3>
                 <p className="text-sm text-muted-foreground">
-                  {productCustomers.length} customers • ${selectedProduct.price} • {selectedProduct.category}
+                  {loadingCustomers ? 'Loading customers...' : `${productCustomers.length} customers`} • ${selectedProduct.price} • {selectedProduct.category}
                 </p>
               </div>
               <Badge variant="secondary">
-                {productCustomers.length} buyers
+                {loadingCustomers ? '...' : productCustomers.length} buyers
               </Badge>
             </div>
 
-            {productCustomers.length > 0 ? (
+            {loadingCustomers ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                <p className="text-sm text-muted-foreground mt-2">Loading customers from database...</p>
+              </div>
+            ) : productCustomers.length > 0 ? (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium">Customers who purchased this product:</h4>
@@ -207,11 +304,14 @@ export function ProductCustomerLookup() {
                           </div>
                           <div className="flex items-center space-x-2 mt-1">
                             <DollarSign className="h-4 w-4 text-green-600" />
-                            <span className="text-sm font-medium">${customer.amount}</span>
+                            <span className="text-sm font-medium">${customer.amount.toFixed(2)}</span>
                             <span className="text-xs text-muted-foreground">
                               on {new Date(customer.purchaseDate).toLocaleDateString()}
                             </span>
                           </div>
+                          <Badge variant="outline" className="text-xs mt-1">
+                            Qty: {customer.quantity} • UUID: {customer.id.slice(0, 8)}...
+                          </Badge>
                         </div>
                       </div>
                     </div>
@@ -219,15 +319,25 @@ export function ProductCustomerLookup() {
                 </div>
 
                 {selectedCustomers.length > 0 && (
-                  <div className="flex items-center justify-between p-3 bg-primary/10 rounded-lg">
-                    <div className="flex items-center space-x-2">
-                      <Users className="h-4 w-4 text-primary" />
-                      <span className="font-medium">{selectedCustomers.length} customers selected</span>
+                  <div className="p-4 bg-primary/10 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Users className="h-4 w-4 text-primary" />
+                        <span className="font-medium">{selectedCustomers.length} customers selected</span>
+                        <Badge variant="secondary">Product: {selectedProduct.name}</Badge>
+                      </div>
+                      <Button onClick={handleTriggerCalls}>
+                        <Phone className="h-4 w-4 mr-2" />
+                        Trigger Calls
+                      </Button>
                     </div>
-                    <Button onClick={handleTriggerCalls}>
-                      <Phone className="h-4 w-4 mr-2" />
-                      Trigger Calls
-                    </Button>
+                    <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+                      <p className="text-sm text-green-700 font-medium">Complete Call Data Package Ready</p>
+                      <p className="text-xs text-green-600 mt-1">
+                        Each call will include: Customer details, product info, call script, coupon codes, and purchase history.
+                        JSON data will be logged to console for external system integration.
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -235,6 +345,7 @@ export function ProductCustomerLookup() {
               <div className="text-center py-8 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No customers have purchased this product yet</p>
+                <p className="text-sm mt-2">Add customers with purchase history to see them here</p>
               </div>
             )}
           </div>
